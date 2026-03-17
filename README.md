@@ -1,6 +1,6 @@
 # Clui CC — Command Line User Interface for Claude Code
 
-A lightweight, transparent desktop overlay for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) on macOS. Clui CC wraps the Claude Code CLI in a floating pill interface with multi-tab sessions, a permission approval UI, voice input, and a skills marketplace.
+A lightweight, transparent desktop overlay for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) on macOS and Windows. Clui CC wraps the Claude Code CLI in a floating pill interface with multi-tab sessions, a permission approval UI, voice input, and a skills marketplace.
 
 ## Demo
 
@@ -83,6 +83,38 @@ To close the app:
 You can also double-click `start.command` and `stop.command` from Finder.
 
 Toggle the overlay: **Alt+Space** (or **Cmd+Shift+K** as fallback).
+
+### Windows Quick Start
+
+**1) Clone the repo**
+
+```bash
+git clone https://github.com/lcoutodemos/clui-cc.git
+```
+
+**2) Enter the project folder**
+
+```bash
+cd clui-cc
+```
+
+**3) Start the app**
+
+```powershell
+.\start.ps1
+```
+
+`start.ps1` runs environment checks, installs dependencies, builds, and launches the app.
+
+To close the app:
+
+```powershell
+.\stop.ps1
+```
+
+Toggle the overlay: **Alt+Space** (or **Ctrl+Alt+Space** if Alt+Space conflicts with the system menu).
+
+> **Note:** Windows SmartScreen may show a warning for unsigned builds. Click "More info" then "Run anyway" to proceed.
 
 <details>
 <summary><strong>Setup Prerequisites (Detailed)</strong></summary>
@@ -248,6 +280,7 @@ npm run doctor
 | Component | Version |
 |-----------|---------|
 | macOS | 15.x (Sequoia) |
+| Windows | 10 / 11 (x64) |
 | Node.js | 20.x LTS, 22.x |
 | Python | 3.12 (with setuptools installed) |
 | Electron | 33.x |
@@ -255,7 +288,8 @@ npm run doctor
 
 ## Known Limitations
 
-- **macOS only** — transparent overlay, tray icon, and node-pty are macOS-specific. Windows/Linux support is not currently implemented.
+- **macOS and Windows only** — Linux support is not yet implemented.
+- **Unsigned Windows builds** — Windows SmartScreen may show a warning when launching for the first time. Click "More info" then "Run anyway" to proceed.
 - **Requires Claude Code CLI** — Clui CC is a UI layer, not a standalone AI client. You need an authenticated `claude` CLI.
 - **Permission mode** — uses `--permission-mode default`. The PTY interactive transport is legacy and disabled by default.
 

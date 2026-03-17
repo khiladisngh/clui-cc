@@ -9,6 +9,7 @@ import { fetchCatalog, listInstalled, installPlugin, uninstallPlugin } from './m
 import { log as _log, LOG_FILE, flushLogs } from './logger'
 import { IPC } from '../shared/types'
 import type { RunOptions, NormalizedEvent, EnrichedError } from '../shared/types'
+import { openTerminal, takeScreenshot, findWhisperBinary, getWhisperModelCandidates } from './platform'
 
 const DEBUG_MODE = process.env.CLUI_DEBUG === '1'
 const SPACES_DEBUG = DEBUG_MODE || process.env.CLUI_SPACES_DEBUG === '1'
@@ -116,7 +117,7 @@ function createWindow(): void {
     roundedCorners: true,
     backgroundColor: '#00000000',
     show: false,
-    icon: join(__dirname, '../../resources/icon.icns'),
+    icon: join(__dirname, '../../resources/', process.platform === 'win32' ? 'icon.ico' : 'icon.icns'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -127,7 +128,8 @@ function createWindow(): void {
   // Belt-and-suspenders: panel already joins all spaces and floats,
   // but explicit flags ensure correct behavior on older Electron builds.
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  mainWindow.setAlwaysOnTop(true, 'screen-saver')
+  // 'screen-saver' z-level on macOS; 'floating' on Windows (screen-saver not supported)
+  mainWindow.setAlwaysOnTop(true, process.platform === 'darwin' ? 'screen-saver' : 'floating')
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show()
@@ -339,7 +341,7 @@ ipcMain.handle(IPC.LIST_SESSIONS, async (_e, projectPath?: string) => {
     const cwd = projectPath || process.cwd()
     // Claude stores project sessions at ~/.claude/projects/<encoded-path>/
     // Path encoding: replace all '/' with '-' (leading '/' becomes leading '-')
-    const encodedPath = cwd.replace(/\//g, '-')
+    const encodedPath = cwd.replace(/[\\/]/g, '-')
     const sessionsDir = join(homedir(), '.claude', 'projects', encodedPath)
     if (!existsSync(sessionsDir)) {
       log(`LIST_SESSIONS: directory not found: ${sessionsDir}`)
@@ -419,7 +421,7 @@ ipcMain.handle(IPC.LOAD_SESSION, async (_e, arg: { sessionId: string; projectPat
   log(`IPC LOAD_SESSION ${sessionId}${projectPath ? ` (path=${projectPath})` : ''}`)
   try {
     const cwd = projectPath || process.cwd()
-    const encodedPath = cwd.replace(/\//g, '-')
+    const encodedPath = cwd.replace(/[\\/]/g, '-')
     const filePath = join(homedir(), '.claude', 'projects', encodedPath, `${sessionId}.jsonl`)
     if (!existsSync(filePath)) return []
 
@@ -557,7 +559,6 @@ ipcMain.handle(IPC.TAKE_SCREENSHOT, async () => {
   await new Promise((r) => setTimeout(r, 300))
 
   try {
-    const { execSync } = require('child_process')
     const { join } = require('path')
     const { tmpdir } = require('os')
     const { readFileSync, existsSync } = require('fs')
@@ -565,12 +566,9 @@ ipcMain.handle(IPC.TAKE_SCREENSHOT, async () => {
     const timestamp = Date.now()
     const screenshotPath = join(tmpdir(), `clui-screenshot-${timestamp}.png`)
 
-    execSync(`/usr/sbin/screencapture -i "${screenshotPath}"`, {
-      timeout: 30000,
-      stdio: 'ignore',
-    })
+    const captured = await takeScreenshot(screenshotPath)
 
-    if (!existsSync(screenshotPath)) {
+    if (!captured || !existsSync(screenshotPath)) {
       return null
     }
 
@@ -643,34 +641,15 @@ ipcMain.handle(IPC.TRANSCRIBE_AUDIO, async (_event, audioBase64: string) => {
     const buf = Buffer.from(audioBase64, 'base64')
     writeFileSync(tmpWav, buf)
 
-    // Find whisper-cli (whisper-cpp homebrew) or whisper (python)
-    const candidates = [
-      '/opt/homebrew/bin/whisper-cli',
-      '/usr/local/bin/whisper-cli',
-      '/opt/homebrew/bin/whisper',
-      '/usr/local/bin/whisper',
-      join(homedir(), '.local/bin/whisper'),
-    ]
-
-    let whisperBin = ''
-    for (const c of candidates) {
-      if (existsSync(c)) { whisperBin = c; break }
-    }
+    // Find whisper binary using platform-aware search
+    const whisperBin = findWhisperBinary()
 
     if (!whisperBin) {
-      try {
-        whisperBin = execSync('/bin/zsh -lc "whence -p whisper-cli"', { encoding: 'utf-8' }).trim()
-      } catch {}
-    }
-    if (!whisperBin) {
-      try {
-        whisperBin = execSync('/bin/zsh -lc "whence -p whisper"', { encoding: 'utf-8' }).trim()
-      } catch {}
-    }
-
-    if (!whisperBin) {
+      const installHint = process.platform === 'win32'
+        ? 'Whisper not found. Download whisper.cpp from https://github.com/ggerganov/whisper.cpp/releases'
+        : 'Whisper not found. Install with: brew install whisper-cpp'
       return {
-        error: 'Whisper not found. Install with: brew install whisper-cpp',
+        error: installHint,
         transcript: null,
       }
     }
@@ -678,21 +657,19 @@ ipcMain.handle(IPC.TRANSCRIBE_AUDIO, async (_event, audioBase64: string) => {
     const isWhisperCpp = whisperBin.includes('whisper-cli')
 
     // Find model file — prefer multilingual (auto-detect language) over .en (English-only)
-    const modelCandidates = [
-      join(homedir(), '.local/share/whisper/ggml-tiny.bin'),
-      join(homedir(), '.local/share/whisper/ggml-base.bin'),
-      '/opt/homebrew/share/whisper-cpp/models/ggml-tiny.bin',
-      '/opt/homebrew/share/whisper-cpp/models/ggml-base.bin',
-      // Fall back to English-only models if multilingual not available
-      join(homedir(), '.local/share/whisper/ggml-tiny.en.bin'),
-      join(homedir(), '.local/share/whisper/ggml-base.en.bin'),
-      '/opt/homebrew/share/whisper-cpp/models/ggml-tiny.en.bin',
-      '/opt/homebrew/share/whisper-cpp/models/ggml-base.en.bin',
+    const modelDirs = getWhisperModelCandidates()
+    const modelNames = [
+      'ggml-tiny.bin', 'ggml-base.bin',
+      'ggml-tiny.en.bin', 'ggml-base.en.bin',
     ]
 
     let modelPath = ''
-    for (const m of modelCandidates) {
-      if (existsSync(m)) { modelPath = m; break }
+    for (const dir of modelDirs) {
+      for (const name of modelNames) {
+        const candidate = join(dir, name)
+        if (existsSync(candidate)) { modelPath = candidate; break }
+      }
+      if (modelPath) break
     }
 
     // Detect if using an English-only model (.en suffix) — force English if so
@@ -774,7 +751,6 @@ ipcMain.handle(IPC.GET_DIAGNOSTICS, () => {
 })
 
 ipcMain.handle(IPC.OPEN_IN_TERMINAL, (_event, arg: string | null | { sessionId?: string | null; projectPath?: string }) => {
-  const { execFile } = require('child_process')
   const claudeBin = 'claude'
 
   // Support both old (string) and new ({ sessionId, projectPath }) calling convention
@@ -787,25 +763,16 @@ ipcMain.handle(IPC.OPEN_IN_TERMINAL, (_event, arg: string | null | { sessionId?:
     projectPath = arg.projectPath && arg.projectPath !== '~' ? arg.projectPath : process.cwd()
   }
 
-  // Escape for AppleScript: double quotes → backslash-escaped, backslashes doubled
-  const projectDir = projectPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-  let cmd: string
-  if (sessionId) {
-    cmd = `cd \\"${projectDir}\\" && ${claudeBin} --resume ${sessionId}`
-  } else {
-    cmd = `cd \\"${projectDir}\\" && ${claudeBin}`
+  // Validate sessionId as UUID to prevent command injection — it flows from renderer IPC
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (sessionId && !UUID_RE.test(sessionId)) {
+    log(`OPEN_IN_TERMINAL: invalid sessionId "${sessionId}" — rejecting`)
+    return false
   }
 
-  const script = `tell application "Terminal"
-  activate
-  do script "${cmd}"
-end tell`
-
   try {
-    execFile('/usr/bin/osascript', ['-e', script], (err: Error | null) => {
-      if (err) log(`Failed to open terminal: ${err.message}`)
-      else log(`Opened terminal with: ${cmd}`)
-    })
+    openTerminal(projectPath, claudeBin, sessionId ?? undefined)
+    log(`Opened terminal for: ${projectPath}${sessionId ? ` (resume ${sessionId})` : ''}`)
     return true
   } catch (err: unknown) {
     log(`Failed to open terminal: ${err}`)
@@ -890,17 +857,22 @@ app.whenReady().then(() => {
   }
 
 
-  // Primary: Option+Space (2 keys, doesn't conflict with shell)
-  // Fallback: Cmd+Shift+K kept as secondary shortcut
-  const registered = globalShortcut.register('Alt+Space', () => toggleWindow('shortcut Alt+Space'))
+  // Primary shortcut: configurable via CLUI_SHORTCUT env var
+  // Default: Alt+Space on macOS, Ctrl+Alt+Space on Windows (Alt+Space opens system menu on Windows)
+  const defaultShortcut = process.platform === 'win32' ? 'Ctrl+Alt+Space' : 'Alt+Space'
+  const primaryShortcut = process.env.CLUI_SHORTCUT || defaultShortcut
+  const registered = globalShortcut.register(primaryShortcut, () => toggleWindow(`shortcut ${primaryShortcut}`))
   if (!registered) {
-    log('Alt+Space shortcut registration failed — macOS input sources may claim it')
+    log(`${primaryShortcut} shortcut registration failed`)
   }
+  // Fallback: Cmd+Shift+K / Ctrl+Shift+K kept as secondary shortcut
   globalShortcut.register('CommandOrControl+Shift+K', () => toggleWindow('shortcut Cmd/Ctrl+Shift+K'))
 
-  const trayIconPath = join(__dirname, '../../resources/trayTemplate.png')
+  const trayIconPath = process.platform === 'win32'
+    ? join(__dirname, '../../resources/icon.ico')
+    : join(__dirname, '../../resources/trayTemplate.png')
   const trayIcon = nativeImage.createFromPath(trayIconPath)
-  trayIcon.setTemplateImage(true)
+  if (process.platform === 'darwin') trayIcon.setTemplateImage(true)
   tray = new Tray(trayIcon)
   tray.setToolTip('Clui CC — Claude Code UI')
   tray.on('click', () => toggleWindow('tray click'))

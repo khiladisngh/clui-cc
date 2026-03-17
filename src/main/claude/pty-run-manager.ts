@@ -18,8 +18,8 @@
 import { EventEmitter } from 'events'
 import { homedir } from 'os'
 import { join } from 'path'
-import { execSync } from 'child_process'
 import { appendFileSync, chmodSync, existsSync, statSync } from 'fs'
+import { findClaudeBinary, getLoginShellEnv, prependBinDir } from '../platform'
 import type { NormalizedEvent, RunOptions, EnrichedError } from '../../shared/types'
 
 // node-pty is a native module — require at runtime to avoid Vite bundling issues
@@ -275,11 +275,10 @@ export class PtyRunManager extends EventEmitter {
   private activeRuns = new Map<string, PtyRunHandle>()
   private _finishedRuns = new Map<string, PtyRunHandle>()
   private claudeBinary: string
-  private _loginShellPath = ''
 
   constructor() {
     super()
-    this.claudeBinary = this._findClaudeBinary()
+    this.claudeBinary = findClaudeBinary()
     this._ensureSpawnHelperExecutable()
     log(`Claude binary: ${this.claudeBinary}`)
   }
@@ -287,8 +286,11 @@ export class PtyRunManager extends EventEmitter {
   /**
    * node-pty prebuilt spawn-helper may lose execute bit depending on install/archive flow.
    * Ensure it's executable at runtime to avoid "posix_spawnp failed".
+   * Windows doesn't use execute bits, so skip entirely.
    */
   private _ensureSpawnHelperExecutable(): void {
+    if (process.platform === 'win32') return
+
     try {
       const pkgPath = require.resolve('node-pty/package.json')
       const path = require('path') as typeof import('path')
@@ -310,49 +312,12 @@ export class PtyRunManager extends EventEmitter {
     }
   }
 
-  private _findClaudeBinary(): string {
-    const candidates = [
-      '/usr/local/bin/claude',
-      '/opt/homebrew/bin/claude',
-      join(homedir(), '.npm-global/bin/claude'),
-    ]
-
-    for (const c of candidates) {
-      try {
-        execSync(`test -x "${c}"`, { stdio: 'ignore' })
-        return c
-      } catch {}
-    }
-
-    try {
-      return execSync('/bin/zsh -lc "whence -p claude"', { encoding: 'utf-8' }).trim()
-    } catch {}
-
-    try {
-      return execSync('/bin/bash -lc "which claude"', { encoding: 'utf-8' }).trim()
-    } catch {}
-
-    return 'claude'
-  }
-
   private _getEnv(): NodeJS.ProcessEnv {
-    const env = { ...process.env }
+    const env = getLoginShellEnv()
     delete env.CLAUDECODE
 
-    if (!this._loginShellPath) {
-      try {
-        this._loginShellPath = execSync('/bin/zsh -lc "echo $PATH"', { encoding: 'utf-8' }).trim()
-      } catch {
-        this._loginShellPath = ''
-      }
-    }
-    if (this._loginShellPath) {
-      env.PATH = this._loginShellPath
-    }
-
-    const binDir = this.claudeBinary.substring(0, this.claudeBinary.lastIndexOf('/'))
-    if (env.PATH && !env.PATH.includes(binDir)) {
-      env.PATH = `${binDir}:${env.PATH}`
+    if (env.PATH) {
+      env.PATH = prependBinDir(env.PATH, this.claudeBinary)
     }
 
     return env

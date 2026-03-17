@@ -61,6 +61,9 @@ const SAFE_BASH_COMMANDS = new Set([
   'tree', 'realpath', 'dirname', 'basename',
   // macOS
   'sw_vers', 'system_profiler', 'defaults', 'mdls', 'mdfind',
+  // Windows
+  'systeminfo', 'ver', 'powershell', 'dir', 'where.exe',
+  'findstr', 'tasklist', 'wmic', 'reg',
   // Diff / compare
   'diff', 'cmp', 'comm', 'sort', 'uniq', 'cut', 'awk', 'sed',
   'jq', 'yq', 'xargs', 'tr',
@@ -97,8 +100,8 @@ function isSafeBashCommand(command: unknown): boolean {
     const actualCmd = cmd.includes('=') ? parts[1] : cmd
     if (!actualCmd) continue
 
-    // Strip path prefix (e.g., /usr/bin/git → git)
-    const base = actualCmd.split('/').pop() || actualCmd
+    // Strip path prefix (e.g., /usr/bin/git → git, C:\Windows\System32\where.exe → where)
+    const base = (actualCmd.split(/[\\/]/).pop() || actualCmd).replace(/\.(exe|cmd|bat)$/i, '')
 
     if (!SAFE_BASH_COMMANDS.has(base)) return false
 

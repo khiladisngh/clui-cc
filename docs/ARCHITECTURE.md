@@ -150,6 +150,19 @@ Theme mode state machine: `system | light | dark` with separate `_systemIsDark` 
 - Debounced marketplace search (200ms).
 - Health reconciliation skips setState when no tabs changed.
 
+## Platform Support
+
+Clui CC supports macOS and Windows. Platform-specific behavior is abstracted via `src/main/platform.ts`, which exposes a unified API for:
+
+- **Window creation** — macOS uses `NSPanel`-style vibrancy with `type: 'panel'`; Windows uses a frameless transparent `BrowserWindow`.
+- **Screen capture** — macOS invokes `screencapture`; Windows invokes the Snipping Tool (`SnippingTool.exe` / `ms-screenclip:`).
+- **Global shortcut** — `Alt+Space` on both platforms, with `Ctrl+Alt+Space` as a Windows fallback when `Alt+Space` conflicts with the system window menu.
+- **Shell detection** — macOS defaults to `zsh`; Windows defaults to `powershell.exe`.
+- **Tray icon** — uses platform-appropriate icon format (`.png` template on macOS, `.ico` on Windows).
+- **Startup scripts** — `start.command` / `stop.command` on macOS; `start.ps1` / `stop.ps1` on Windows.
+
+Linux support is not yet implemented.
+
 ## IPC Channel Map
 
 All channels are defined in `src/shared/types.ts` under the `IPC` const. Events flow through a single `clui:normalized-event` channel for all Claude Code stream events, with separate channels for tab status changes and enriched errors.

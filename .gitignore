@@ -29,6 +29,12 @@ Desktop.ini
 *.log
 ~/.clui-debug.log
 
+# Windows build artifacts
+*.exe
+*.msi
+*.nupkg
+*.appx
+
 # Temporary files
 *.tmp
 *.bak

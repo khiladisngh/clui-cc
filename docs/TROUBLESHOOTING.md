@@ -134,3 +134,33 @@ Try:
 
 - `Cmd+Shift+K`
 - Confirm app is running from the menu bar tray
+
+## Windows-Specific Issues
+
+### `gyp ERR!` or MSBuild Errors During `npm install`
+
+Windows native module compilation requires Visual Studio Build Tools with the C++ workload.
+
+Install them from [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/), selecting the "Desktop development with C++" workload. Then retry:
+
+```powershell
+npm install
+```
+
+### Alt+Space Conflict
+
+On Windows, `Alt+Space` opens the system window menu by default. If this conflicts with the Clui CC toggle shortcut, use `Ctrl+Alt+Space` instead, or set a custom shortcut via the `CLUI_SHORTCUT` environment variable:
+
+```powershell
+$env:CLUI_SHORTCUT = "Ctrl+Shift+Space"
+```
+
+### node-pty Build Failures
+
+`node-pty` requires native compilation on Windows. Ensure you have:
+
+- Node.js 18 or later
+- Python 3.x on PATH
+- Visual Studio Build Tools with the C++ workload installed
+
+Then retry `npm install`.
